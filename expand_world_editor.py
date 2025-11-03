@@ -698,7 +698,7 @@ class ExpandWorldEditor:
                 self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
                 
                 # Update visible entries immediately
-                self._update_visible_entries_immediate()
+                self.update_visible_entries()
                 
                 # Cancel any pending updates
                 if hasattr(self, '_scroll_job'):
@@ -749,7 +749,7 @@ class ExpandWorldEditor:
                 self.canvas.yview_scroll(-1 * direction, "units")
                 
                 # Update visible entries immediately
-                self._update_visible_entries_immediate()
+                self.update_visible_entries()
                 
                 # Cancel any pending updates
                 if hasattr(self, '_scroll_job'):
@@ -925,30 +925,14 @@ class ExpandWorldEditor:
         self.update_visible_entries()
     
     def update_visible_entries(self, event=None):
-        """Update which entries are currently visible in the viewport with section-based loading"""
+        """Update which entries are currently visible in the viewport"""
         if not hasattr(self, 'canvas') or not hasattr(self, 'filtered_data'):
             return
             
         try:
-            # Get the visible area of the canvas
-            canvas_y = self.canvas.canvasy(0)
-            canvas_height = self.canvas.winfo_height()
-            
-            # Define the size of each section (in pixels)
-            section_size = 2000  # Load 2000 pixels at a time
-            
-            # Calculate which sections should be visible
-            first_visible_section = max(0, int(canvas_y // section_size) - 1)
-            last_visible_section = int((canvas_y + canvas_height) // section_size) + 1
-            
-            # Calculate the range of entries that should be visible
-            entries_per_section = 10  # Number of entries to load per section
-            first_visible = first_visible_section * entries_per_section
-            last_visible = (last_visible_section + 1) * entries_per_section
-            
-            # Ensure we don't go out of bounds
-            first_visible = max(0, first_visible)
-            last_visible = min(len(self.filtered_data), last_visible)
+            # Load all entries - no lazy loading for now
+            first_visible = 0
+            last_visible = len(self.filtered_data)
             
             # Track which entries should be visible in this update
             should_be_visible = set(range(first_visible, last_visible))
@@ -975,10 +959,19 @@ class ExpandWorldEditor:
             
             # Update scroll region if needed
             if not hasattr(self, '_last_scroll_height') or self._last_scroll_height != len(self.filtered_data):
-                # Estimate total height based on number of entries
-                entry_height = self.entry_height + (2 * self.entry_padding)
-                entries_per_column = (len(self.filtered_data) + 1) // 2
-                total_height = (entries_per_column * entry_height) + 100  # Add padding for buttons
+                # Calculate the actual content height by checking the scrollable frame
+                self.canvas.update_idletasks()
+                
+                # Get the bounding box of all content in the canvas
+                bbox = self.canvas.bbox("all")
+                if bbox:
+                    # bbox returns (x1, y1, x2, y2)
+                    total_height = bbox[3] + 50  # Add padding at the bottom
+                else:
+                    # Fallback: estimate based on number of entries
+                    entry_height = 50  # Collapsed entry height
+                    entries_per_column = (len(self.filtered_data) + 1) // 2
+                    total_height = (entries_per_column * entry_height) + 100
                 
                 # Set the scroll region to the full height
                 self.canvas.config(scrollregion=(0, 0, self.canvas.winfo_width(), total_height))
@@ -992,72 +985,130 @@ class ExpandWorldEditor:
             if hasattr(self, 'canvas') and self.canvas.winfo_exists():
                 self.canvas.after(100, self.update_visible_entries)
     
+    def toggle_entry_expand(self, index, expand_btn, content_frame):
+        """Toggle the expanded/collapsed state of an entry"""
+        if not hasattr(self, 'entry_states'):
+            self.entry_states = {}
+            
+        # Toggle the state
+        is_expanded = self.entry_states.get(index, False)
+        self.entry_states[index] = not is_expanded
+        
+        # Update the button text and show/hide content
+        if is_expanded:
+            expand_btn.config(text="+")
+            content_frame.grid_remove()
+        else:
+            expand_btn.config(text="-")
+            content_frame.grid()
+        
+        # Update the scroll region after the widget is shown/hidden
+        self.canvas.update_idletasks()
+        self.update_scroll_region()
+    
     def create_entry_widget(self, index):
         """Create a widget for a single entry"""
         if index >= len(self.filtered_data):
             return
+        
+        try:
+            item = self.filtered_data[index]
             
-        item = self.filtered_data[index]
-        
-        # Choose which column to place this entry in (alternating)
-        column = self.left_column if index % 2 == 0 else self.right_column
-        
-        # Create a frame for the entry
-        entry_frame = ttk.LabelFrame(column, text=f"{self.current_category} Entry {index + 1}")
-        entry_frame.pack(fill=tk.X, padx=2, pady=2, ipadx=5, ipady=5, expand=True)
-        
-        # Store reference to the frame
-        if not hasattr(self, 'entry_frames'):
-            self.entry_frames = {}
-        self.entry_frames[index] = entry_frame
-        
-        # Configure grid for entry frame
-        entry_frame.columnconfigure(0, weight=1)
-        
-        # Header frame for delete button
-        header_frame = ttk.Frame(entry_frame)
-        header_frame.grid(row=0, column=0, sticky="ew")
-        header_frame.columnconfigure(0, weight=1)
-        
-        # Add delete button to header
-        del_btn = ttk.Button(
-            header_frame,
-            text="X",
-            width=3,
-            command=lambda i=index: self.delete_clutter_entry(i)
-        )
-        del_btn.grid(row=0, column=1, padx=5, sticky="e")
-        
-        # Main parameter frame
-        main_param_frame = ttk.Frame(entry_frame)
-        main_param_frame.grid(row=1, column=0, sticky="nsew")
-        main_param_frame.columnconfigure(1, weight=1)
-        
-        # Frame for the add parameter button
-        add_param_frame = ttk.Frame(entry_frame)
-        add_param_frame.grid(row=2, column=0, sticky="ew", pady=(5, 0))
-        
-        # Store frames for this entry
-        if not hasattr(self, 'entry_widgets'):
-            self.entry_widgets = {}
-        if not hasattr(self, 'param_frames'):
-            self.param_frames = {}
+            # Choose which column to place this entry in (alternating)
+            column = self.left_column if index % 2 == 0 else self.right_column
             
-        self.entry_widgets[index] = {}
-        self.param_frames[index] = {
-            'main': main_param_frame,
-            'add_param': add_param_frame,
-            'frame': entry_frame
-        }
-        
-        # Add initial required parameters and parameters that exist in the item
-        if self.current_category in self.param_defs:
-            for param, param_info in self.param_defs[self.current_category].items():
-                if param_info.get('required', False) or param in item:
-                    self._add_parameter_widget(index, param, item)
-        
-        # Add parameter button
-        self._update_add_param_button(index)
+            # Create a frame for the entry
+            entry_frame = ttk.Frame(column, padding=2)
+            entry_frame.pack(fill=tk.X, pady=2, expand=True)
+            
+            # Store reference to the frame
+            if not hasattr(self, 'entry_frames'):
+                self.entry_frames = {}
+            self.entry_frames[index] = entry_frame
+            
+            # Configure grid for entry frame
+            entry_frame.columnconfigure(1, weight=1)
+            
+            # Header frame for the entry
+            header_frame = ttk.Frame(entry_frame)
+            header_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
+            header_frame.columnconfigure(1, weight=1)
+            
+            # Expand/collapse button
+            expand_btn = ttk.Button(
+                header_frame,
+                text="+",  # Start collapsed (+)
+                width=2,
+                command=lambda i=index, btn=None, frm=None: self.toggle_entry_expand(i, btn, frm)
+            )
+            expand_btn.grid(row=0, column=0, padx=2, sticky="w")
+            
+            # Entry title
+            title = item.get('prefab', item.get('name', f"{self.current_category} Entry {index + 1}"))
+            title_label = ttk.Label(
+                header_frame,
+                text=title,
+                font=('TkDefaultFont', 9, 'bold')
+            )
+            title_label.grid(row=0, column=1, sticky="w")
+            
+            # Delete button
+            del_btn = ttk.Button(
+                header_frame,
+                text="X",
+                width=2,
+                command=lambda i=index: self.delete_clutter_entry(i)
+            )
+            del_btn.grid(row=0, column=2, padx=2, sticky="e")
+            
+            # Content frame (initially hidden)
+            content_frame = ttk.LabelFrame(entry_frame, padding=5)
+            content_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
+            
+            # Set initial state to collapsed
+            if not hasattr(self, 'entry_states'):
+                self.entry_states = {}
+            self.entry_states[index] = False
+            content_frame.grid_remove()
+            
+            # Update the expand button command with the content frame reference
+            expand_btn.config(command=lambda i=index, btn=expand_btn, frm=content_frame: 
+                             self.toggle_entry_expand(i, btn, frm))
+            
+            # Main parameter frame
+            main_param_frame = ttk.Frame(content_frame)
+            main_param_frame.pack(fill=tk.X, expand=True)
+            
+            # Frame for the add parameter button
+            add_param_frame = ttk.Frame(content_frame)
+            add_param_frame.pack(fill=tk.X, pady=(5, 0))
+            
+            # Store frames for this entry
+            if not hasattr(self, 'entry_widgets'):
+                self.entry_widgets = {}
+            if not hasattr(self, 'param_frames'):
+                self.param_frames = {}
+                
+            self.entry_widgets[index] = {}
+            self.param_frames[index] = {
+                'main': main_param_frame,
+                'add_param': add_param_frame,
+                'frame': entry_frame
+            }
+            
+            # Add initial required parameters and parameters that exist in the item
+            if self.current_category in self.param_defs:
+                for param, param_info in self.param_defs[self.current_category].items():
+                    if param_info.get('required', False) or param in item:
+                        self._add_parameter_widget(index, param, item)
+            
+            # Add parameter button
+            self._update_add_param_button(index)
+            
+        except Exception as e:
+            print(f"Error creating entry widget for index {index}: {e}")
+            import traceback
+            traceback.print_exc()
     
     def destroy_entry_widget(self, index):
         """Destroy the widget for a single entry"""
@@ -1416,6 +1467,31 @@ class ExpandWorldEditor:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save {self.current_category} entries: {str(e)}")
             
+    def delete_clutter_entry(self, index):
+        """Delete an entry from the current category"""
+        try:
+            if not hasattr(self, 'filtered_data') or index >= len(self.filtered_data):
+                return
+                
+            # Get the item to be deleted
+            item_to_delete = self.filtered_data[index]
+            
+            # Remove from filtered data
+            del self.filtered_data[index]
+            
+            # Remove from original data if it exists there
+            if self.current_category in self.files and 'data' in self.files[self.current_category]:
+                if item_to_delete in self.files[self.current_category]['data']:
+                    self.files[self.current_category]['data'].remove(item_to_delete)
+            
+            # Update the display
+            self.update_visible_entries()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to delete entry: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
     def add_clutter_entry(self):
         """Add a new empty entry for the current category"""
         try:
