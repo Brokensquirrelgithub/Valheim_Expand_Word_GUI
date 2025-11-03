@@ -50,7 +50,8 @@ class ExpandWorldEditor:
             "Environments": {"path": None, "data": []},
             "Spawns": {"path": None, "data": []},
             "Locations": {"path": None, "data": []},
-            "Vegetation": {"path": None, "data": []}
+            "Vegetation": {"path": None, "data": []},
+            "Biomes": {"path": None, "data": []}
         }
         
         # Try to load the last used profile
@@ -377,6 +378,37 @@ class ExpandWorldEditor:
                     "default": [],
                     "tooltip": "List of status effects active in this environment. Note: Normal biome effects still apply."
                 }
+            },
+            "Biomes": {
+                "biome": {"type": "str", "required": True, "default": "", "tooltip": "Identifier for this biome. Used in other files."},
+                "name": {"type": "str", "required": False, "default": "", "tooltip": "Display name. Required for new biomes."},
+                "terrain": {"type": "str", "required": False, "default": "", "tooltip": "Base biome identifier. Determines terrain algorithm. Required for new biomes."},
+                "nature": {"type": "str", "required": False, "default": "", "tooltip": "Base biome for plants/bees/footsteps. If not given, uses terrain value."},
+                "altitudeDelta": {"type": "float", "required": False, "default": 0.0, "tooltip": "Flat increase/decrease to terrain altitude."},
+                "altitudeMultiplier": {"type": "float", "required": False, "default": 1.0, "tooltip": "Multiplier to terrain altitude (relative to water level)."},
+                "waterDepthMultiplier": {"type": "float", "required": False, "default": 1.0, "tooltip": "Multiplies negative terrain altitude."},
+                "forestMultiplier": {"type": "float", "required": False, "default": 1.0, "tooltip": "Multiplier to global forest multiplier. Requires extra biome check."},
+                "environments": {"type": "list", "required": False, "default": [], "tooltip": "List of available environments (weathers) and their relative chances."},
+                "requiredGlobalKeys": {"type": "list", "required": False, "default": [], "tooltip": "Active if all of these world keys are set."},
+                "forbiddenGlobalKeys": {"type": "list", "required": False, "default": [], "tooltip": "Active if none of these world keys are set."},
+                "requiredPlayerKeys": {"type": "list", "required": False, "default": [], "tooltip": "Active if all of these player keys are set."},
+                "forbiddenPlayerKeys": {"type": "list", "required": False, "default": [], "tooltip": "Active if none of these player keys are set."},
+                "maximumAltitude": {"type": "float", "required": False, "default": 1000.0, "tooltip": "Maximum altitude in meters."},
+                "minimumAltitude": {"type": "float", "required": False, "default": -1000.0, "tooltip": "Minimum altitude in meters."},
+                "excessFactor": {"type": "float", "required": False, "default": 0.5, "tooltip": "How strongly altitude is reduced if over limits."},
+                "paint": {"type": "str", "required": False, "default": "", "tooltip": "Default terrain paint (dirt, cultivated, paved, vegetation 0.0-1.0)."},
+                "color": {"type": "color", "required": False, "default": {"r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0}, "tooltip": "Terrain style color (r, g, b, a)."},
+                "mapColorMultiplier": {"type": "float", "required": False, "default": 1.0, "tooltip": "Changes how altitude affects map color."},
+                "mapColor": {"type": "color", "required": False, "default": {"r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0}, "tooltip": "Color in minimap (r, g, b, a)."},
+                "musicMorning": {"type": "str", "required": False, "default": "", "tooltip": "Music override for morning."},
+                "musicDay": {"type": "str", "required": False, "default": "", "tooltip": "Music override for daytime."},
+                "musicEvening": {"type": "str", "required": False, "default": "", "tooltip": "Music override for evening."},
+                "musicNight": {"type": "str", "required": False, "default": "", "tooltip": "Music override for night."},
+                "noBuild": {"type": "bool", "required": False, "default": False, "tooltip": "If true, players can't build in this biome."},
+                "statusEffects": {"type": "list", "required": False, "default": [], "tooltip": "List of status effects active in this biome."},
+                "lava": {"type": "bool", "required": False, "default": False, "tooltip": "If true, biome can have lava."},
+                "lavaAmount": {"type": "float", "required": False, "default": 1.0, "tooltip": "Amount of lava (1 = 100%)."},
+                "lavaStretch": {"type": "float", "required": False, "default": 1.0, "tooltip": "Multiplies the size of lava areas."}
             }
         }
         
@@ -486,7 +518,7 @@ class ExpandWorldEditor:
         
         # Create tabs for each category
         self.category_frames = {}
-        for category in ["Clutter", "Environments", "Spawns", "Locations", "Vegetation"]:
+        for category in ["Clutter", "Environments", "Spawns", "Locations", "Vegetation", "Biomes"]:
             frame = ttk.Frame(self.category_notebook)
             self.category_notebook.add(frame, text=category)
             self.category_frames[category] = frame
@@ -1301,16 +1333,20 @@ class ExpandWorldEditor:
             self.entry_widgets[entry_idx][param] = (var, "bool")
             ToolTip(widget, tooltips.get(param, ""))
         elif param_info["type"] == "list":
-            # Handle biome lists properly
-            value = item_data.get(param, param_info["default"])
-            if isinstance(value, list):
-                display_value = ", ".join(str(v).strip() for v in value if str(v).strip())
+            # Special handling for environments in Biomes category
+            if self.current_category == "Biomes" and param == "environments":
+                self._create_environments_widget(frame, entry_idx, param, item_data, param_info)
             else:
-                display_value = str(value) if value else ""
-            var = tk.StringVar(value=display_value)
-            widget = ttk.Entry(frame, textvariable=var)
-            self.entry_widgets[entry_idx][param] = (var, "list")
-            ToolTip(widget, tooltips.get(param, ""))
+                # Handle other lists properly
+                value = item_data.get(param, param_info["default"])
+                if isinstance(value, list):
+                    display_value = ", ".join(str(v).strip() for v in value if str(v).strip())
+                else:
+                    display_value = str(value) if value else ""
+                var = tk.StringVar(value=display_value)
+                widget = ttk.Entry(frame, textvariable=var)
+                self.entry_widgets[entry_idx][param] = (var, "list")
+                ToolTip(widget, tooltips.get(param, ""))
         elif param_info["type"] == "int":
             var = tk.StringVar(value=str(item_data.get(param, param_info["default"])))
             widget = ttk.Entry(frame, textvariable=var, validate='key')
@@ -1326,14 +1362,215 @@ class ExpandWorldEditor:
             widget = ttk.Entry(frame, textvariable=var)
             self.entry_widgets[entry_idx][param] = (var, "str")
         
-        if param_info["type"] != "color":  # Color widgets are already packed
+        if param_info["type"] != "color" and not (self.current_category == "Biomes" and param == "environments"):
             widget.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         
-        # Add remove button for non-required parameters
-        if not param_info.get('required', False) and param_info["type"] != "color":  # Don't add remove button for colors
+        # Add remove button for non-required parameters (but not for environments in Biomes)
+        if (not param_info.get('required', False) and param_info["type"] != "color" and 
+            not (self.current_category == "Biomes" and param == "environments")):
             remove_btn = ttk.Button(frame, text="−", width=2,
                                  command=lambda p=param, i=entry_idx: self._remove_parameter(i, p))
             remove_btn.pack(side=tk.RIGHT, padx=2)
+    
+    def _create_environments_widget(self, frame, entry_idx, param, item_data, param_info):
+        """Create an elegant widget for editing environments in Biomes"""
+        # Get environments data
+        environments = item_data.get(param, param_info["default"])
+        if not isinstance(environments, list):
+            environments = []
+        
+        # Create a frame for the environments list
+        env_frame = ttk.LabelFrame(frame, text="Environments", padding=5)
+        env_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Create a treeview to display environments
+        tree_frame = ttk.Frame(env_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Create scrollbar
+        scrollbar = ttk.Scrollbar(tree_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Create treeview
+        tree = ttk.Treeview(tree_frame, columns=("Environment", "Weight", "Ashlands", "DeepNorth"), 
+                           height=6, yscrollcommand=scrollbar.set)
+        scrollbar.config(command=tree.yview)
+        
+        # Define columns
+        tree.column("#0", width=0, stretch=tk.NO)
+        tree.column("Environment", anchor=tk.W, width=150)
+        tree.column("Weight", anchor=tk.CENTER, width=80)
+        tree.column("Ashlands", anchor=tk.CENTER, width=80)
+        tree.column("DeepNorth", anchor=tk.CENTER, width=80)
+        
+        # Create headings
+        tree.heading("#0", text="", anchor=tk.W)
+        tree.heading("Environment", text="Environment", anchor=tk.W)
+        tree.heading("Weight", text="Weight", anchor=tk.CENTER)
+        tree.heading("Ashlands", text="Ashlands Override", anchor=tk.CENTER)
+        tree.heading("DeepNorth", text="DeepNorth Override", anchor=tk.CENTER)
+        
+        # Populate tree with environments
+        for env in environments:
+            if isinstance(env, dict):
+                env_name = env.get("environment", "Unknown")
+                weight = env.get("weight", 1)
+                ashlands = "✓" if env.get("ashlandsOverride", False) else ""
+                deepnorth = "✓" if env.get("deepNorthOverride", False) else ""
+                tree.insert("", "end", values=(env_name, weight, ashlands, deepnorth))
+        
+        tree.pack(fill=tk.BOTH, expand=True)
+        
+        # Create button frame
+        btn_frame = ttk.Frame(env_frame)
+        btn_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        # Add button
+        add_btn = ttk.Button(btn_frame, text="+ Add Environment",
+                            command=lambda: self._add_environment(entry_idx, param, tree))
+        add_btn.pack(side=tk.LEFT, padx=2)
+        
+        # Edit button
+        edit_btn = ttk.Button(btn_frame, text="✎ Edit",
+                             command=lambda: self._edit_environment(entry_idx, param, tree))
+        edit_btn.pack(side=tk.LEFT, padx=2)
+        
+        # Delete button
+        del_btn = ttk.Button(btn_frame, text="✕ Delete",
+                            command=lambda: self._delete_environment(entry_idx, param, tree))
+        del_btn.pack(side=tk.LEFT, padx=2)
+        
+        # Store reference to tree and environments data
+        self.entry_widgets[entry_idx][param] = (tree, "environments")
+    
+    def _add_environment(self, entry_idx, param, tree):
+        """Add a new environment to the list"""
+        # Create a simple dialog to add environment
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Add Environment")
+        dialog.geometry("400x200")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        ttk.Label(dialog, text="Environment Name:").pack(anchor=tk.W, padx=10, pady=5)
+        env_entry = ttk.Entry(dialog, width=40)
+        env_entry.pack(anchor=tk.W, padx=10, pady=5)
+        
+        ttk.Label(dialog, text="Weight (default: 1):").pack(anchor=tk.W, padx=10, pady=5)
+        weight_entry = ttk.Entry(dialog, width=40)
+        weight_entry.insert(0, "1")
+        weight_entry.pack(anchor=tk.W, padx=10, pady=5)
+        
+        ashlands_var = tk.BooleanVar()
+        ttk.Checkbutton(dialog, text="Ashlands Override", variable=ashlands_var).pack(anchor=tk.W, padx=10, pady=5)
+        
+        deepnorth_var = tk.BooleanVar()
+        ttk.Checkbutton(dialog, text="DeepNorth Override", variable=deepnorth_var).pack(anchor=tk.W, padx=10, pady=5)
+        
+        def save_env():
+            env_name = env_entry.get().strip()
+            if not env_name:
+                messagebox.showwarning("Invalid", "Environment name cannot be empty")
+                return
+            
+            try:
+                weight = float(weight_entry.get()) if weight_entry.get() else 1
+            except ValueError:
+                weight = 1
+            
+            # Add to tree
+            ashlands = "✓" if ashlands_var.get() else ""
+            deepnorth = "✓" if deepnorth_var.get() else ""
+            tree.insert("", "end", values=(env_name, weight, ashlands, deepnorth))
+            
+            # Update the underlying data
+            self._update_environments_data(entry_idx, param, tree)
+            dialog.destroy()
+        
+        ttk.Button(dialog, text="Add", command=save_env).pack(pady=10)
+    
+    def _edit_environment(self, entry_idx, param, tree):
+        """Edit the selected environment"""
+        selection = tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select an environment to edit")
+            return
+        
+        item = selection[0]
+        values = tree.item(item)["values"]
+        
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Edit Environment")
+        dialog.geometry("400x200")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        ttk.Label(dialog, text="Environment Name:").pack(anchor=tk.W, padx=10, pady=5)
+        env_entry = ttk.Entry(dialog, width=40)
+        env_entry.insert(0, values[0])
+        env_entry.pack(anchor=tk.W, padx=10, pady=5)
+        
+        ttk.Label(dialog, text="Weight:").pack(anchor=tk.W, padx=10, pady=5)
+        weight_entry = ttk.Entry(dialog, width=40)
+        weight_entry.insert(0, str(values[1]))
+        weight_entry.pack(anchor=tk.W, padx=10, pady=5)
+        
+        ashlands_var = tk.BooleanVar(value=values[2] == "✓")
+        ttk.Checkbutton(dialog, text="Ashlands Override", variable=ashlands_var).pack(anchor=tk.W, padx=10, pady=5)
+        
+        deepnorth_var = tk.BooleanVar(value=values[3] == "✓")
+        ttk.Checkbutton(dialog, text="DeepNorth Override", variable=deepnorth_var).pack(anchor=tk.W, padx=10, pady=5)
+        
+        def save_env():
+            env_name = env_entry.get().strip()
+            if not env_name:
+                messagebox.showwarning("Invalid", "Environment name cannot be empty")
+                return
+            
+            try:
+                weight = float(weight_entry.get()) if weight_entry.get() else 1
+            except ValueError:
+                weight = 1
+            
+            ashlands = "✓" if ashlands_var.get() else ""
+            deepnorth = "✓" if deepnorth_var.get() else ""
+            tree.item(item, values=(env_name, weight, ashlands, deepnorth))
+            
+            self._update_environments_data(entry_idx, param, tree)
+            dialog.destroy()
+        
+        ttk.Button(dialog, text="Save", command=save_env).pack(pady=10)
+    
+    def _delete_environment(self, entry_idx, param, tree):
+        """Delete the selected environment"""
+        selection = tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select an environment to delete")
+            return
+        
+        for item in selection:
+            tree.delete(item)
+        
+        self._update_environments_data(entry_idx, param, tree)
+    
+    def _update_environments_data(self, entry_idx, param, tree):
+        """Update the underlying environments data from the tree"""
+        environments = []
+        for item in tree.get_children():
+            values = tree.item(item)["values"]
+            env_dict = {
+                "environment": values[0],
+                "weight": float(values[1]) if values[1] else 1
+            }
+            if values[2] == "✓":
+                env_dict["ashlandsOverride"] = True
+            if values[3] == "✓":
+                env_dict["deepNorthOverride"] = True
+            environments.append(env_dict)
+        
+        # Update the data in the current item
+        if entry_idx < len(self.filtered_data):
+            self.filtered_data[entry_idx][param] = environments
     
     def _update_add_param_button(self, entry_idx):
         """Update the add parameter button for the specified entry"""
@@ -1581,7 +1818,8 @@ class ExpandWorldEditor:
                 "Environments": "expand_environments.yaml",
                 "Spawns": "expand_spawns.yaml",
                 "Locations": "expand_locations.yaml",
-                "Vegetation": "expand_vegetation.yaml"
+                "Vegetation": "expand_vegetation.yaml",
+                "Biomes": "expand_biomes.yaml"
             }
             
             files_loaded = 0
@@ -1681,9 +1919,9 @@ class ExpandWorldEditor:
         categories = list(self.category_frames.keys())
         new_category = categories[selected_tab]
         
-        # Only allow entry mode for categories that support it (Clutter, Spawns, and Environments)
-        if self.view_mode == "entry" and new_category not in ["Clutter", "Spawns", "Environments"]:
-            messagebox.showinfo("Info", "Entry mode is only available for Clutter, Spawns, and Environments")
+        # Only allow entry mode for categories that support it (Clutter, Spawns, Environments, and Biomes)
+        if self.view_mode == "entry" and new_category not in ["Clutter", "Spawns", "Environments", "Biomes"]:
+            messagebox.showinfo("Info", "Entry mode is only available for Clutter, Spawns, Environments, and Biomes")
             # Switch back to table view
             self.view_mode = "table"
             self.view_mode_var.set("table")
